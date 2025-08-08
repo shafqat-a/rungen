@@ -18,7 +18,28 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat, SelectorGroupChat
 from autogen_agentchat.ui import Console
 from autogen_agentchat.messages import TextMessage, ChatMessage
-from autogen_core.tools import tool, Tool, ToolSchema
+from autogen_core.tools import Tool, ToolSchema
+
+# Compatibility import for the tool decorator across AutoGen versions
+try:
+    from autogen_core.tools import tool as tool_decorator  # preferred path in some versions
+except Exception:  # pragma: no cover - fallback paths
+    try:
+        from autogen_core.tools.tool import tool as tool_decorator  # alternate path
+    except Exception:
+        tool_decorator = None  # will define a no-op fallback below
+
+def _noop_tool_decorator(func=None, **kwargs):
+    """Fallback no-op decorator if AutoGen tool decorator is unavailable."""
+    if func is None:
+        def wrapper(f):
+            return f
+        return wrapper
+    return func
+
+# Use resolved decorator or fallback
+tool = tool_decorator or _noop_tool_decorator
+TOOL_DECORATOR_AVAILABLE = tool_decorator is not None
 
 # Multi-provider support
 from orion1_models import create_orion1_team, ORION1_MODELS
@@ -272,6 +293,10 @@ class ProjectTools:
 def create_file_tools(project_tools: ProjectTools) -> List[Tool]:
     """Create AutoGen tool wrappers for file operations"""
     
+    # If the tool decorator isn't available in this AutoGen version, disable tools gracefully
+    if not TOOL_DECORATOR_AVAILABLE:
+        return []
+
     tools = []
     
     # Read file tool
@@ -378,59 +403,58 @@ def create_file_tools(project_tools: ProjectTools) -> List[Tool]:
 
 # ============================================================================
 # ENHANCED ORION1 TEAM WITH TOOLS
-# ============================================================================
-
 class Orion1ProjectTeam:
     """Enhanced Orion1 team with project management capabilities"""
-    
+
     def __init__(self, project_root: str = "."):
         self.project_root = project_root
         self.project_tools = ProjectTools(project_root)
         self.tools = create_file_tools(self.project_tools)
         self.team_members = {}
         self.objective = ""
-        
+
+        if not TOOL_DECORATOR_AVAILABLE:
+            print("\n⚠️ AutoGen tool decorator not available in this environment.")
+            print("   File/command tools are disabled. Core team chat will still work.")
+            print("   To enable tools, upgrade autogen-core to >=0.7.2 or matching version.")
+
     def check_api_keys(self) -> List[str]:
         """Check which API keys are available"""
         required_keys = {
             "GROQ_API_KEY": "Groq (Principal Decision Maker, Product Manager)",
-            "GOOGLE_API_KEY": "Google Gemini (Software Architect)", 
+            "GOOGLE_API_KEY": "Google Gemini (Software Architect)",
             "OPEN_AI_KEY": "Moonshot AI (Software Developers)",
-            "DEEPKEY_API_KEY": "DeepSeek (Software Tester)"
+            "DEEPKEY_API_KEY": "DeepSeek (Software Tester)",
         }
-        
-        missing_keys = []
-        available_keys = []
-        
+
+        missing_keys: List[str] = []
+        available_keys: List[str] = []
+
         for key, description in required_keys.items():
             if os.getenv(key):
                 available_keys.append(f"✅ {description}")
             else:
                 missing_keys.append(f"❌ {description} - Missing {key}")
-        
+
         return missing_keys, available_keys
-    
+
     def create_enhanced_team(self) -> Dict[str, AssistantAgent]:
         """Create the Orion1 team with tool access"""
-        # Get base team
         base_team = create_orion1_team()
-        
-        # Add tools to each team member
-        enhanced_team = {}
-        
+
+        enhanced_team: Dict[str, AssistantAgent] = {}
         for role, agent in base_team.items():
-            # Create enhanced agent with tools
             enhanced_agent = AssistantAgent(
                 name=agent.name,
                 description=agent.description,
                 system_message=self._get_enhanced_system_message(role, agent.system_message),
                 model_client=agent.model_client,
-                tools=self.tools  # Add tools to each agent
+                tools=self.tools,
             )
             enhanced_team[role] = enhanced_agent
-        
+
         return enhanced_team
-    
+
     def _get_enhanced_system_message(self, role: str, base_message: str) -> str:
         """Enhance system message with tool usage instructions"""
         tool_instructions = """
@@ -458,7 +482,7 @@ SECURITY NOTES:
 - Always use relative paths from the project root
 
 """
-        
+
         role_specific_instructions = {
             "principal_decision_maker": """
 As Principal Decision Maker, use tools to:
@@ -503,13 +527,13 @@ As Software Tester with Playwright expertise, use tools to:
 - Set up CI/CD testing pipelines
 """
         }
-        
+
         enhanced_message = base_message + tool_instructions
         if role in role_specific_instructions:
             enhanced_message += role_specific_instructions[role]
-            
+
         return enhanced_message
-    
+
     async def get_user_objective(self) -> str:
         """Get project objective from user"""
         print("🎯 Welcome to Orion1 - AI Software Development Team")
@@ -524,71 +548,70 @@ As Software Tester with Playwright expertise, use tools to:
         print("• Develop a Python CLI tool for data processing")
         print("• Set up automated testing for existing codebase")
         print()
-        
+
         while True:
             objective = input("📝 Project Objective: ").strip()
             if objective:
                 self.objective = objective
                 return objective
             print("❌ Please provide a project objective.")
-    
+
     async def analyze_project_context(self) -> str:
         """Analyze current project context"""
         print("\n🔍 Analyzing current project context...")
-        
-        context = []
-        
+
+        context: List[str] = []
+
         # Check project structure
         files_result = self.project_tools.list_files(".", "*", True)
         if files_result["success"]:
             context.append(f"📁 Project contains {files_result['count']} files")
-            
+
             # Check for key files
             key_files = ["README.md", "package.json", "requirements.txt", "Cargo.toml", "pom.xml"]
-            found_files = []
+            found_files: List[str] = []
             for file_info in files_result["files"]:
                 if file_info["name"] in key_files:
                     found_files.append(file_info["name"])
-            
+
             if found_files:
                 context.append(f"📄 Found key files: {', '.join(found_files)}")
-        
+
         # Check if it's a git repository
         git_result = self.project_tools.run_command("git status", ".", 5)
         if git_result.success:
             context.append("📦 Git repository detected")
-        
+
         # Check for common project types
-        project_types = []
+        project_types: List[str] = []
         file_patterns = {
             "Python": ["*.py", "requirements.txt", "setup.py"],
             "JavaScript/Node.js": ["package.json", "*.js", "*.ts"],
             "React": ["package.json", "public/index.html", "src/App.js"],
             "Java": ["*.java", "pom.xml", "build.gradle"],
             "Rust": ["Cargo.toml", "*.rs"],
-            "Go": ["go.mod", "*.go"]
+            "Go": ["go.mod", "*.go"],
         }
-        
+
         for proj_type, patterns in file_patterns.items():
             found = any(
-                any(pattern in f["name"] or f["path"].endswith(pattern.replace("*", "")) 
-                    for f in files_result.get("files", []))
+                any(pattern in f["name"] or f["path"].endswith(pattern.replace("*", "")) for f in files_result.get("files", []))
                 for pattern in patterns
             )
             if found:
                 project_types.append(proj_type)
-        
+
         if project_types:
             context.append(f"🛠️ Detected project types: {', '.join(project_types)}")
-        
+
         return "\n".join(context) if context else "📂 Empty or new project directory"
-    
+
     async def run_project_session(self):
         """Main project session with user interaction"""
-        
+
         # Check API keys
         missing_keys, available_keys = self.check_api_keys()
-        
+
         if missing_keys:
             print("⚠️ Missing API Keys:")
             for key in missing_keys:
@@ -597,22 +620,22 @@ As Software Tester with Playwright expertise, use tools to:
             for key in available_keys:
                 print(f"  {key}")
             print()
-            
+
             proceed = input("Continue with available services? (y/n): ").lower()
             if proceed != 'y':
                 print("Please configure your API keys and try again.")
                 return
-        
+
         # Get user objective
         objective = await self.get_user_objective()
-        
+
         # Analyze project context
         context = await self.analyze_project_context()
-        
+
         print(f"\n📋 Project Context:")
         print(context)
         print()
-        
+
         # Confirm with user
         print(f"🎯 Objective: {objective}")
         print()
@@ -620,19 +643,19 @@ As Software Tester with Playwright expertise, use tools to:
         if confirm != 'y':
             print("Session cancelled.")
             return
-        
+
         # Create enhanced team
         print("\n🚀 Initializing Orion1 team with project tools...")
         try:
             team_members = self.create_enhanced_team()
             print("✅ Team created successfully!")
-            
+
             # Show team composition
             print("\n👥 Team Members:")
             for role, agent in team_members.items():
                 print(f"  • {agent.name}")
             print()
-            
+
             # Create the project planning prompt
             planning_prompt = f"""
 PROJECT KICKOFF SESSION
@@ -690,17 +713,17 @@ IMPORTANT:
 
 Let's begin the project planning session!
 """
-            
+
             # Create team chat
             team_list = list(team_members.values())
             team_chat = RoundRobinGroupChat(team_list)
-            
+
             print("🗣️ Starting project planning session...")
             print("=" * 60)
-            
+
             # Run the planning session
-            result = await Console(team_chat.run_stream(task=planning_prompt))
-            
+            _ = await Console(team_chat.run_stream(task=planning_prompt))
+
             print("\n" + "=" * 60)
             print("✅ Project planning session completed!")
             print("\n💡 The team is ready to start development work!")
@@ -708,7 +731,7 @@ Let's begin the project planning session!
             print("• Review the team's recommendations")
             print("• Execute specific development tasks")
             print("• Use the team for ongoing project collaboration")
-            
+
         except Exception as e:
             print(f"❌ Error during team session: {e}")
             print("\nTroubleshooting:")
