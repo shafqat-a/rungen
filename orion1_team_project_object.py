@@ -18,7 +18,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat, SelectorGroupChat
 from autogen_agentchat.ui import Console
 from autogen_agentchat.messages import TextMessage, ChatMessage
-from autogen_core.tools import Tool, ToolSchema
+from autogen_core.tools import tool, Tool, ToolSchema
 
 # Multi-provider support
 from orion1_models import create_orion1_team, ORION1_MODELS
@@ -275,7 +275,7 @@ def create_file_tools(project_tools: ProjectTools) -> List[Tool]:
     tools = []
     
     # Read file tool
-    @Tool
+    @tool
     def read_file(file_path: str) -> str:
         """
         Read the contents of a file
@@ -293,7 +293,7 @@ def create_file_tools(project_tools: ProjectTools) -> List[Tool]:
             return f"❌ Error reading {file_path}: {result.error}"
     
     # Write file tool
-    @Tool
+    @tool
     def write_file(file_path: str, content: str) -> str:
         """
         Write content to a file
@@ -312,7 +312,7 @@ def create_file_tools(project_tools: ProjectTools) -> List[Tool]:
             return f"❌ Error writing {file_path}: {result.error}"
     
     # List files tool
-    @Tool
+    @tool
     def list_files(directory: str = ".", pattern: str = "*", recursive: bool = True) -> str:
         """
         List files in a directory
@@ -345,7 +345,7 @@ def create_file_tools(project_tools: ProjectTools) -> List[Tool]:
             return f"❌ Error listing files: {result['error']}"
     
     # Run command tool
-    @Tool 
+    @tool 
     def run_command(command: str, cwd: str = ".", timeout: int = 30) -> str:
         """
         Execute a shell command
